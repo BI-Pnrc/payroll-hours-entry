@@ -31,7 +31,8 @@ def build_table(text, master):
         t or (i if s >= MIN_SCORE else '')
         for t, i, s in zip(text_ids, res['employee_id'], res['score'])
     ]
-    return res[['name_raw', 'employee_id', 'pay_type', 'hours', 'flags']]
+    res['chat_hours'] = res['hours']
+    return res[['name_raw', 'employee_id', 'pay_type', 'hours', 'chat_hours', 'flags']]
 
 
 def add_lookup_and_status(df, master):
@@ -43,16 +44,17 @@ def add_lookup_and_status(df, master):
     dup = out.duplicated(subset=['employee_id', 'pay_type'], keep=False) & (out['employee_id'] != '')
     status = []
     for i, row in out.iterrows():
-        hours = row['hours']
+        hours, chat = row['hours'], row['chat_hours']
         ok = (
             row['employee_name'] != ''
-            and row['pay_type'] in PAY_TYPES
             and pd.notna(hours) and hours > 0
+            and pd.notna(chat) and abs(float(hours) - float(chat)) < 1e-9
             and not dup[i]
         )
         status.append('Matched' if ok else 'Not matched')
     out['status'] = status
-    return out[['name_raw', 'employee_id', 'employee_name', 'pay_type', 'hours', 'status', 'flags']]
+    return out[['name_raw', 'employee_id', 'employee_name', 'pay_type', 'hours', 'chat_hours',
+                'status', 'flags']]
 
 
 def editor_key():
@@ -66,7 +68,7 @@ def apply_edits(master):
         for col, val in changes.items():
             df.loc[idx, col] = val if val is not None else ('' if col != 'hours' else None)
     st.session_state['base'] = add_lookup_and_status(
-        df[['name_raw', 'employee_id', 'pay_type', 'hours', 'flags']], master)
+        df[['name_raw', 'employee_id', 'pay_type', 'hours', 'chat_hours', 'flags']], master)
 
 
 def to_excel(df, period):
@@ -157,8 +159,8 @@ if st.button('Create table'):
 if 'base' in st.session_state:
     df = st.session_state['base']
     st.subheader('Review')
-    st.caption('Names are looked up from the employee ID. If a row is Not matched, '
-               'pick the right employee ID (and fix pay type / hours) in the table.')
+    st.caption('Full names come from your employee list. A row is Matched when the employee is found '
+               'and Hours equals Hours in chat. If not, pick the right employee ID in the table.')
 
     st.data_editor(
         df,
@@ -166,7 +168,7 @@ if 'base' in st.session_state:
         key=editor_key(),
         on_change=apply_edits,
         args=(master,),
-        disabled=['name_raw', 'employee_name', 'status', 'flags'],
+        disabled=['name_raw', 'employee_name', 'chat_hours', 'status', 'flags'],
         column_config={
             'name_raw': 'Name in chat',
             'employee_id': st.column_config.SelectboxColumn(
@@ -174,6 +176,7 @@ if 'base' in st.session_state:
             'pay_type': st.column_config.SelectboxColumn(
                 'pay_type', options=[''] + PAY_TYPES),
             'hours': st.column_config.NumberColumn('hours', min_value=0.0),
+            'chat_hours': 'Hours in chat',
             'flags': None,
         },
     )
